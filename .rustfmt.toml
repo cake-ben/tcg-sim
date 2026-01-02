@@ -1,0 +1,4 @@
+edition = "2024"
+max_width = 100
+brace_style = "AlwaysNextLine"
+format_code_in_doc_comments = true

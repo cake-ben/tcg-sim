@@ -636,13 +636,16 @@ fn try_scenario(lands: u32, nonlands: u32, program_state: &mut ProgramState) -> 
 
     let avg_turns_to_death = total_turns as f64 / games as f64;
 
-    println!(
-        "Average turns to death for deck with {} lands and {} nonlands over {} games: {:.4}",
-        lands,
-        nonlands,
-        games,
-        avg_turns_to_death
-    );
+    if program_state.step_mode != StepCommand::Quit
+    {
+        println!(
+            "Average turns to death for deck with {} lands and {} nonlands over {} games: {:.4}",
+            lands,
+            nonlands,
+            games,
+            avg_turns_to_death
+        );
+    }
 
     avg_turns_to_death
 }
@@ -675,27 +678,39 @@ fn main()
         program_state.step_mode = wait_for_command();
     }
 
-    let result1 = try_scenario(land_count + change_size, nonland_count - change_size, &mut program_state);
-    if program_state.step_mode == StepCommand::RunDeck
+    let mut result1 = 0.0;
+
+    if program_state.step_mode != StepCommand::Quit
     {
-        program_state.step_mode = wait_for_command();
+        result1 = try_scenario(land_count + change_size, nonland_count - change_size, &mut program_state);
+        if program_state.step_mode == StepCommand::RunDeck
+        {
+            program_state.step_mode = wait_for_command();
+        }
     }
 
-    let result2 = try_scenario(land_count - change_size, nonland_count + change_size, &mut program_state);
-
-    let smallest_turns_to_death = result0.min(result1).min(result2);
-
-    if result0 == smallest_turns_to_death
-    {
-        vlog!(ELoggingVerbosity::Normal, "Suggestion: Deck is decent as-is");
+    let mut result2 = 0.0;
+    if program_state.step_mode != StepCommand::Quit
+    {   
+        result2 = try_scenario(land_count - change_size, nonland_count + change_size, &mut program_state);
     }
-    else if result1 == smallest_turns_to_death
+
+    if program_state.step_mode != StepCommand::Quit
     {
-        vlog!(ELoggingVerbosity::Normal, "Suggestion: Try more land cards.");
-    }
-    else if result2 == smallest_turns_to_death
-    {
-        vlog!(ELoggingVerbosity::Normal, "Suggestion: Try more nonland cards.");
+         let smallest_turns_to_death = result0.min(result1).min(result2);
+
+        if result0 == smallest_turns_to_death
+        {
+            vlog!(ELoggingVerbosity::Normal, "Suggestion: Deck is decent as-is");
+        }
+        else if result1 == smallest_turns_to_death
+        {
+            vlog!(ELoggingVerbosity::Normal, "Suggestion: Try more land cards.");
+        }
+        else if result2 == smallest_turns_to_death
+        {
+            vlog!(ELoggingVerbosity::Normal, "Suggestion: Try more nonland cards.");
+        }
     }
 }
 
