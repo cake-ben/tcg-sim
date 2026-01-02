@@ -95,22 +95,61 @@ macro_rules! vlog
     }};
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 enum CardType 
 {
     Land,
     Creature,
 }
 
-// TODO: make it so only cards with the creature type have power/toughness, using composition.
-#[derive(Clone, Debug)]
-struct Card 
+// Use composition so only creatures have power/toughness.
+#[derive(Copy, Clone, Debug)]
+struct CreatureStats
 {
-    name: &'static str,
-    card_type: CardType,
-    cost: u32,
     power: u8,
     toughness: u8,
+}
+
+#[derive(Clone, Debug)]
+struct Card
+{
+    name: &'static str,
+    card_types: Vec<CardType>,
+    cost: u32,
+    stats: Option<CreatureStats>,
+}
+
+impl Card
+{
+    fn is_type(&self, t: CardType) -> bool
+    {
+        self.card_types.iter().any(|ct| *ct == t)
+    }
+
+    fn is_creature(&self) -> bool
+    {
+        self.is_type(CardType::Creature)
+    }
+
+    fn add_type(&mut self, t: CardType)
+    {
+        if !self.card_types.contains(&t)
+        {
+            self.card_types.push(t);
+        }
+    }
+
+    fn remove_type(&mut self, t: CardType)
+    {
+        if let Some(pos) = self.card_types.iter().position(|ct| *ct == t)
+        {
+            self.card_types.remove(pos);
+            if t == CardType::Creature
+            {
+                self.stats = None;
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -123,31 +162,29 @@ impl Deck
 {
     fn count(&self, card_type: CardType) -> usize 
     {
-        self.cards.iter().filter(|c| c.card_type == card_type).count()
+        self.cards.iter().filter(|c| c.is_type(card_type)).count()
     }
 }
 
 fn forest() -> Card 
 {
-    Card 
+    Card
     {
         name: "Forest",
-        card_type: CardType::Land,
+        card_types: vec![CardType::Land],
         cost: 0,
-        power: 0,
-        toughness: 0,
+        stats: None,
     }
 }
 
 fn grizzly_bears() -> Card 
 {
-    Card 
+    Card
     {
         name: "Grizzly Bears",
-        card_type: CardType::Creature,
+        card_types: vec![CardType::Creature],
         cost: 2,
-        power: 2,
-        toughness: 2,
+        stats: Some(CreatureStats { power: 2, toughness: 2 }),
     }
 }
 
@@ -252,7 +289,7 @@ impl GameState
                     let card_option =
                     {
                         let hand = self.zones.get_mut(&Zone::Hand).unwrap();
-                        if let Some(pos) = hand.iter().position(|c| c.card_type == CardType::Land)
+                        if let Some(pos) = hand.iter().position(|c| c.is_type(CardType::Land))
                         {
                             Some(hand.remove(pos))  // hand borrow ends here
                         }
@@ -284,7 +321,7 @@ impl GameState
                         let castable;
                         {
                             let hand = self.zones.get(&Zone::Hand).unwrap();
-                            castable = hand[i].card_type == CardType::Creature && hand[i].cost <= self.lands;
+                            castable = hand[i].is_creature() && hand[i].cost <= self.lands;
                         }
 
                         if castable
@@ -318,7 +355,7 @@ impl GameState
                 let mut damage = 0;
                 for creature in battlefield.iter()
                 {
-                    damage += creature.power as u32;
+                    damage += creature.stats.map(|s| s.power as u32).unwrap_or(0);
                 }
 
                 self.life -= damage as i32;
@@ -393,15 +430,13 @@ impl GameState
                 Zone::Library =>
                 {
                     // Show library cards grouped by count
-                    let mut card_groups: HashMap<&str, (CardType, u32)> = HashMap::new();
+                    let mut card_groups: HashMap<&str, u32> = HashMap::new();
                     for card in cards.iter()
                     {
-                        card_groups.entry(card.name)
-                            .and_modify(|(_, count)| *count += 1)
-                            .or_insert((card.card_type.clone(), 1));
+                        *card_groups.entry(card.name).or_insert(0) += 1;
                     }
 
-                    for (name, (card_type, count)) in card_groups.iter()
+                    for (name, count) in card_groups.iter()
                     {
                         println!("  {} x{}", name, count);
                     }
@@ -439,39 +474,39 @@ impl GameState
                 Zone::Battlefield =>
                 {
                     // Group identical cards together with counts
-                    let mut card_groups: HashMap<&str, (u8, u8, CardType, u32)> = HashMap::new();
+                    let mut card_groups: HashMap<&str, (u8, u8, bool, u32)> = HashMap::new();
                     for card in cards.iter()
                     {
+                        let power = card.stats.map(|s| s.power).unwrap_or(0);
+                        let toughness = card.stats.map(|s| s.toughness).unwrap_or(0);
+                        let is_creature = card.is_creature();
                         card_groups.entry(card.name)
                             .and_modify(|(_, _, _, count)| *count += 1)
-                            .or_insert((card.power, card.toughness, card.card_type.clone(), 1));
+                            .or_insert((power, toughness, is_creature, 1));
                     }
 
-                    for (name, (power, toughness, card_type, count)) in card_groups.iter()
+                    for (name, (power, toughness, is_creature, count)) in card_groups.iter()
                     {
-                        match card_type
+                        if *is_creature
                         {
-                            CardType::Creature =>
+                            if *count > 1
                             {
-                                if *count > 1 
-                                {
-                                    println!("  {}: {}/{} x{}", name, power, toughness, count);
-                                } 
-                                else 
-                                {
-                                    println!("  {}: {}/{}", name, power, toughness);
-                                }
+                                println!("  {}: {}/{} x{}", name, power, toughness, count);
                             }
-                            _ =>
+                            else
                             {
-                                if *count > 1
-                                {
-                                    println!("  {} x{}", name, count);
-                                }
-                                else
-                                {
-                                    println!("  {}", name);
-                                }
+                                println!("  {}: {}/{}", name, power, toughness);
+                            }
+                        }
+                        else
+                        {
+                            if *count > 1
+                            {
+                                println!("  {} x{}", name, count);
+                            }
+                            else
+                            {
+                                println!("  {}", name);
                             }
                         }
                     }
@@ -661,5 +696,36 @@ fn main()
     else if result2 == smallest_turns_to_death
     {
         vlog!(ELoggingVerbosity::Normal, "Suggestion: Try more nonland cards.");
+    }
+}
+
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn card_composition_and_type_mutation()
+    {
+        let f = forest();
+        assert!(!f.is_creature());
+        assert!(f.stats.is_none());
+
+        let mut g = grizzly_bears();
+        assert!(g.is_creature());
+        assert!(g.stats.is_some());
+        assert_eq!(g.stats.unwrap().power, 2);
+
+        // remove creature type clears stats
+        g.remove_type(CardType::Creature);
+        assert!(!g.is_creature());
+        assert!(g.stats.is_none());
+
+        // add creature type back and set stats
+        g.add_type(CardType::Creature);
+        g.stats = Some(CreatureStats { power: 3, toughness: 3 });
+        assert!(g.is_creature());
+        assert_eq!(g.stats.unwrap().power, 3);
     }
 }
