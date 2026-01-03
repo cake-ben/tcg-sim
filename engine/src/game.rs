@@ -3,18 +3,179 @@ use rand::thread_rng;
 use std::collections::HashMap;
 
 use crate::card::{Card, Deck};
-use crate::creature;
 use crate::ELoggingVerbosity;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum GameStep 
 {
     StartTurn,
+    Upkeep,
     Draw,
     Main,
     Combat,
     EndTurn,
     GameOver,
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+    use crate::card::{grizzly_bears, forest};
+    use crate::creature;
+
+    #[test]
+    fn creature_without_sickness_deals_damage()
+    {
+        let mut battlefield = Vec::new();
+        let mut g = grizzly_bears();
+        creature::add_creature_fragment(&mut g, 2, 2);
+        creature::set_summoning_sickness(&mut g, false);
+        battlefield.push(g);
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Battlefield, battlefield);
+        zones.insert(Zone::Hand, Vec::new());
+        zones.insert(Zone::Library, Vec::new());
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::Combat };
+        gs.step();
+        assert_eq!(gs.life, 18);
+    }
+
+    #[test]
+    fn creature_with_sickness_does_not_deal_damage()
+    {
+        let mut battlefield = Vec::new();
+        let mut g = grizzly_bears();
+        creature::set_summoning_sickness(&mut g, true);
+        battlefield.push(g);
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Battlefield, battlefield);
+        zones.insert(Zone::Hand, Vec::new());
+        zones.insert(Zone::Library, Vec::new());
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::Combat };
+        gs.step();
+        assert_eq!(gs.life, 20);
+    }
+
+    #[test]
+    fn summoning_sickness_cleared_on_upkeep()
+    {
+        let mut battlefield = Vec::new();
+        let mut g = grizzly_bears();
+        creature::set_summoning_sickness(&mut g, true);
+        battlefield.push(g);
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Battlefield, battlefield);
+        zones.insert(Zone::Hand, Vec::new());
+        zones.insert(Zone::Library, Vec::new());
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::Upkeep };
+        gs.step();
+        let bf = gs.zones.get(&Zone::Battlefield).unwrap();
+        assert!(!crate::creature::has_summoning_sickness(&bf[0]));
+    }
+
+    #[test]
+    fn play_one_land_if_available()
+    {
+        let library = Vec::new();
+        let mut hand = Vec::new();
+        hand.push(forest());
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Library, library);
+        zones.insert(Zone::Hand, hand);
+        zones.insert(Zone::Battlefield, Vec::new());
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::Main };
+        gs.step();
+
+        assert_eq!(gs.zones.get(&Zone::Battlefield).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn play_as_many_creatures_as_possible()
+    {
+        // Start with 4 lands available and two creatures in hand (cost 2 each)
+        let mut hand = Vec::new();
+        hand.push(grizzly_bears());
+        hand.push(grizzly_bears());
+
+        let mut battlefield = Vec::new();
+        for _ in 0..4 {
+            battlefield.push(forest());
+        }
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Library, Vec::new());
+        zones.insert(Zone::Hand, hand);
+        zones.insert(Zone::Battlefield, battlefield);
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::Main };
+        gs.step();
+
+        // Both creatures should have been cast if mana allowed (4 lands, 2 creatures at 2 mana each)
+        assert_eq!(gs.zones.get(&Zone::Battlefield).unwrap().len(), 6); // 4 lands + 2 creatures
+        // Verify we have the 4 lands still on battlefield
+        assert_eq!(gs.zones.get(&Zone::Battlefield).unwrap().iter().filter(|c| c.is_type(crate::card::CardType::Land)).count(), 4);
+    }
+
+    #[test]
+    fn multi_turn_summoning_sickness_flow()
+    {
+        // Hand: 2x Forest + Grizzly, Battlefield: 1x Forest (to give us 2 mana for grizzly)
+        // Library: 2x Forest (for subsequent draws)
+        // This ensures we can play another land and cast the grizzly in the first main phase
+        let mut hand = Vec::new();
+        hand.push(forest());
+        hand.push(forest());
+        hand.push(grizzly_bears());
+
+        let mut battlefield = Vec::new();
+        battlefield.push(forest());
+
+        let mut library = Vec::new();
+        library.push(forest());
+        library.push(forest());
+
+        let mut zones = std::collections::HashMap::new();
+        zones.insert(Zone::Library, library);
+        zones.insert(Zone::Hand, hand);
+        zones.insert(Zone::Battlefield, battlefield);
+        zones.insert(Zone::Graveyard, Vec::new());
+
+        let mut gs = GameState { zones, life: 20, turns: 0, step: GameStep::StartTurn };
+
+        // Turn 1: StartTurn -> Upkeep -> Draw -> Main -> Combat
+        gs.step(); // StartTurn -> Upkeep
+        gs.step(); // Upkeep -> Draw (draws a forest)
+        gs.step(); // Draw -> Main
+        gs.step(); // Main -> Combat (plays 1 land, casts grizzly with 2 mana total, gives it summoning sickness)
+        gs.step(); // Combat should NOT deal damage because creature is sick
+        assert_eq!(gs.life, 20, "Creature with summoning sickness should not deal damage on the turn it was cast");
+
+        // Continue to EndTurn -> StartTurn -> Upkeep (for turn 2)
+        gs.step(); // Combat -> EndTurn
+        gs.step(); // EndTurn -> StartTurn
+        gs.step(); // StartTurn -> Upkeep (clears sickness)
+
+        // Advance to Combat of second turn
+        gs.step(); // Upkeep -> Draw (draws another forest)
+        gs.step(); // Draw -> Main
+        gs.step(); // Main -> Combat
+        gs.step(); // Combat should now deal damage
+        assert!(gs.life < 20, "Creature should deal damage after sickness cleared on upkeep");
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -59,7 +220,6 @@ pub struct GameState
 {
     pub zones: HashMap<Zone, Vec<Card>>,
 
-    pub lands: u32,
     pub life: i32,
     pub turns: u32,
 
@@ -93,7 +253,6 @@ impl GameState
         GameState 
         {
             zones,
-            lands: 0,
             life: 20,
             turns: 0,
             step: GameStep::StartTurn,
@@ -110,6 +269,18 @@ impl GameState
             GameStep::StartTurn =>
             {
                 self.turns += 1;
+                self.step = GameStep::Upkeep;
+            }
+
+            GameStep::Upkeep =>
+            {
+                // Remove summoning sickness from creatures that have it
+                let battlefield = self.zones.get_mut(&Zone::Battlefield).unwrap();
+                for card in battlefield.iter_mut()
+                {
+                    crate::creature::set_summoning_sickness(card, false);
+                }
+
                 self.step = GameStep::Draw;
             }
 
@@ -152,13 +323,12 @@ impl GameState
 
                     if let Some(card) = card_option
                     {
-                        self.lands += 1;
                         let battlefield = self.zones.get_mut(&Zone::Battlefield).unwrap();
                         battlefield.push(card);
                     }
                 }
 
-                // Cast creatures
+                // Cast creatures using lands on battlefield as mana
                 {
                     let mut i = 0;
                     loop
@@ -171,21 +341,24 @@ impl GameState
 
                         let castable;
                         {
+                            let available_mana = self.zones.get(&Zone::Battlefield).unwrap().iter().filter(|c| c.is_type(crate::card::CardType::Land)).count() as u32;
                             let hand = self.zones.get(&Zone::Hand).unwrap();
-                            castable = crate::creature::is_creature(&hand[i]) && hand[i].cost <= self.lands;
+                            castable = crate::creature::is_creature(&hand[i]) && hand[i].cost <= available_mana;
                         }
 
                         if castable
                         {
                             // Remove card first
-                            let card = 
+                            let mut card = 
                             {
                                 let hand = self.zones.get_mut(&Zone::Hand).unwrap();
                                 hand.remove(i)
                             };
 
-                            self.lands -= card.cost; // adjust mana
                             vlog!(ELoggingVerbosity::Verbose, "Cast {}", card.name);
+
+                            // Newly cast creatures have summoning sickness
+                            crate::creature::set_summoning_sickness(&mut card, true);
 
                             let battlefield = self.zones.get_mut(&Zone::Battlefield).unwrap();
                             battlefield.push(card);
@@ -206,7 +379,10 @@ impl GameState
                 let mut damage = 0;
                 for card in battlefield.iter()
                 {
-                    damage += crate::creature::creature_stats(card).map(|s| s.power as u32).unwrap_or(0);
+                    if !crate::creature::has_summoning_sickness(card)
+                    {
+                        damage += crate::creature::creature_stats(card).map(|s| s.power as u32).unwrap_or(0);
+                    }
                 }
 
                 self.life -= damage as i32;
@@ -324,29 +500,40 @@ impl GameState
                 }
                 Zone::Battlefield =>
                 {
-                    // Group identical cards together with counts
-                    let mut card_groups: HashMap<&str, (u8, u8, bool, u32)> = HashMap::new();
+                    // Group identical cards together with counts (use owned String keys)
+                    let mut card_groups: HashMap<String, (&str, u8, u8, bool, bool, u32)> = HashMap::new();
                     for card in cards.iter()
                     {
                         let power = crate::creature::creature_stats(card).map(|s| s.power).unwrap_or(0);
                         let toughness = crate::creature::creature_stats(card).map(|s| s.toughness).unwrap_or(0);
                         let is_creature = crate::creature::is_creature(card);
-                        card_groups.entry(card.name)
-                            .and_modify(|(_, _, _, count)| *count += 1)
-                            .or_insert((power, toughness, is_creature, 1));
+                        let is_sick = crate::creature::has_summoning_sickness(card);
+
+                        let uniquename = if is_creature && is_sick
+                        {
+                            format!("{} (sick)", card.name)
+                        }
+                        else
+                        {
+                            card.name.to_string()
+                        };
+
+                        card_groups.entry(uniquename)
+                            .and_modify(|(_, _, _, _, _, count)| *count += 1)
+                            .or_insert((card.name, power, toughness, is_creature, is_sick, 1));
                     }
 
-                    for (name, (power, toughness, is_creature, count)) in card_groups.iter()
+                    for (_uniquename, (name, power, toughness, is_creature, is_sick, count)) in card_groups.iter()
                     {
                         if *is_creature
                         {
                             if *count > 1
                             {
-                                println!("  {}: {}/{} x{}", name, power, toughness, count);
+                                println!("  {}: {}/{} x{} ({})", name, power, toughness, count, is_sick.then(|| "sick").unwrap_or("ready"));
                             }
                             else
                             {
-                                println!("  {}: {}/{}", name, power, toughness);
+                                println!("  {}: {}/{} ({})", name, power, toughness, is_sick.then(|| "sick").unwrap_or("ready"));
                             }
                         }
                         else

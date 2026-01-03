@@ -25,6 +25,7 @@ pub enum CardFragmentKind
 pub trait Fragment: Any + Send + Sync
 {
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn box_clone(&self) -> Box<dyn Fragment>;
 }
 
@@ -32,6 +33,7 @@ pub trait Fragment: Any + Send + Sync
 pub struct CreatureFragment
 {
     pub stats: CreatureStats,
+    pub summoning_sickness: bool,
 }
 
 impl Fragment for CreatureFragment
@@ -41,9 +43,14 @@ impl Fragment for CreatureFragment
         self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn Any
+    {
+        self
+    }
+
     fn box_clone(&self) -> Box<dyn Fragment>
     {
-        Box::new(CreatureFragment { stats: self.stats })
+        Box::new(CreatureFragment { stats: self.stats, summoning_sickness: self.summoning_sickness })
     }
 }
 
@@ -124,7 +131,7 @@ pub fn grizzly_bears() -> Card
             let mut m = HashMap::new();
             m.insert(
                 CardFragmentKind::Creature,
-                Box::new(CreatureFragment { stats: CreatureStats { power: 2, toughness: 2 } }) as Box<dyn Fragment>,
+                Box::new(CreatureFragment { stats: CreatureStats { power: 2, toughness: 2 }, summoning_sickness: false }) as Box<dyn Fragment>,
             );
             m
         },
