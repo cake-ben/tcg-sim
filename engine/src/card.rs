@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::any::Any;
+use serde::{Serialize, Deserialize};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CardType 
 {
     Land,
@@ -9,14 +10,14 @@ pub enum CardType
 }
 
 // Use composition so only creatures have power/toughness.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct CreatureStats
 {
     pub power: u8,
     pub toughness: u8,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CardFragmentKind
 {
     Creature,
@@ -29,7 +30,7 @@ pub trait Fragment: Any + Send + Sync
     fn box_clone(&self) -> Box<dyn Fragment>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreatureFragment
 {
     pub stats: CreatureStats,
@@ -62,13 +63,87 @@ impl Clone for Box<dyn Fragment>
     }
 }
 
-#[derive(Clone)]
+// Serializable representation of fragments
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SerializableFragment
+{
+    Creature(CreatureFragment),
+}
+
+impl SerializableFragment
+{
+    /// Convert to trait object
+    pub fn to_fragment(&self) -> Box<dyn Fragment>
+    {
+        match self
+        {
+            SerializableFragment::Creature(cf) => Box::new(cf.clone()),
+        }
+    }
+
+    /// Convert from trait object (best effort)
+    pub fn from_fragment(fragment: &dyn Fragment) -> Option<Self>
+    {
+        if let Some(cf) = fragment.as_any().downcast_ref::<CreatureFragment>()
+        {
+            return Some(SerializableFragment::Creature(cf.clone()));
+        }
+        None
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Card
 {
-    pub name: &'static str,
+    pub name: String,
     pub card_types: Vec<CardType>,
     pub cost: u32,
+    #[serde(serialize_with = "serialize_fragments", deserialize_with = "deserialize_fragments")]
     pub fragments: HashMap<CardFragmentKind, Box<dyn Fragment>>,
+}
+
+// Custom serialization for fragments
+fn serialize_fragments<S>(
+    fragments: &HashMap<CardFragmentKind, Box<dyn Fragment>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let serializable: HashMap<CardFragmentKind, SerializableFragment> = fragments
+        .iter()
+        .filter_map(|(k, v)| {
+            SerializableFragment::from_fragment(v.as_ref()).map(|sf| (*k, sf))
+        })
+        .collect();
+    serializable.serialize(serializer)
+}
+
+// Custom deserialization for fragments
+fn deserialize_fragments<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<CardFragmentKind, Box<dyn Fragment>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let serializable: HashMap<CardFragmentKind, SerializableFragment> =
+        HashMap::deserialize(deserializer)?;
+    Ok(serializable
+        .into_iter()
+        .map(|(k, v)| (k, v.to_fragment()))
+        .collect())
+}
+
+impl std::fmt::Debug for Card
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("Card")
+            .field("name", &self.name)
+            .field("card_types", &self.card_types)
+            .field("cost", &self.cost)
+            .finish()
+    }
 }
 
 impl Card
@@ -113,7 +188,7 @@ pub fn forest() -> Card
 {
     Card
     {
-        name: "Forest",
+        name: String::from("Forest"),
         card_types: vec![CardType::Land],
         cost: 0,
         fragments: HashMap::new(),
@@ -124,7 +199,7 @@ pub fn grizzly_bears() -> Card
 {
     Card
     {
-        name: "Grizzly Bears",
+        name: String::from("Grizzly Bears"),
         card_types: vec![CardType::Creature],
         cost: 2,
         fragments: {
