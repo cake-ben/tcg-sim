@@ -18,8 +18,8 @@ fn main()
     println!("  q  -> quit");
     println!();
 
-    let mut current_lands = 29;
-    let mut current_nonlands = 31;
+    let mut current_lands = 28;
+    let mut current_nonlands = 500;
     let change_size = 1;
 
     program_state.step_mode = sim::parse_command(&read_line().trim());
@@ -27,6 +27,8 @@ fn main()
     // Hill-climbing algorithm: track results and find consensus among 3+ runs
     let mut result_history: HashMap<(u32, u32), Vec<f64>> = HashMap::new();
     let mut iteration = 1;
+
+    let mut win_counts: HashMap<(u32, u32), u32> = HashMap::new();
 
     loop
     {
@@ -93,91 +95,72 @@ fn main()
             ("More nonlands", current_lands - change_size, current_nonlands + change_size)
         };
 
+        let winner_key = (best_lands, best_nonlands);
+        let wins = win_counts.entry(winner_key).or_insert(0);
+        *wins += 1;
+
         println!("\nIteration {} Results:", iteration);
         println!("  Current:     {} lands, {} nonlands -> {} avg turns", current_lands, current_nonlands, result0);
         println!("  More lands:  {} lands, {} nonlands -> {} avg turns", current_lands + change_size, current_nonlands - change_size, result1);
         println!("  More nonlands: {} lands, {} nonlands -> {} avg turns", current_lands - change_size, current_nonlands + change_size, result2);
-        println!("\nBest configuration: {} ({} lands, {} nonlands) -> {} avg turns",
-                 best_config_name, best_lands, best_nonlands, smallest_turns_to_death);
+        println!("\nBest configuration: {} ({} lands, {} nonlands) -> {} avg turns (total wins: {})",
+            best_config_name, best_lands, best_nonlands, smallest_turns_to_death, *wins);
 
-        // Find configurations with 3+ runs
-        let mut candidates: Vec<(u32, u32, f64)> = Vec::new();
-        for ((lands, nonlands), results) in &result_history
-        {
-            if results.len() >= 3
-            {
-                let avg: f64 = results.iter().sum::<f64>() / results.len() as f64;
-                candidates.push((*lands, *nonlands, avg));
-            }
-        }
+        // Find decks that have reached 3 wins
+        let winners: Vec<_> = win_counts
+            .iter()
+            .filter(|(_, count)| **count >= 3)
+            .map(|(&(l, nl), _)| (l, nl))
+            .collect();
 
-        if candidates.is_empty()
+        if winners.is_empty() 
         {
-            // Not enough data yet, just move to the best from this iteration
+            // Continue hill-climbing
             current_lands = best_lands;
             current_nonlands = best_nonlands;
-            println!("Not enough data yet. Moving to best found: {} lands, {} nonlands", current_lands, current_nonlands);
-        }
-        else
+        } 
+        else if winners.len() == 1 
         {
-            // Find the minimum average
-            let min_avg = candidates.iter().map(|(_, _, avg)| avg).fold(f64::INFINITY, |a, b| a.min(*b));
-            
-            // Get all candidates that match the minimum
-            let tied_candidates: Vec<_> = candidates.iter()
-                .filter(|(_, _, avg)| (avg - min_avg).abs() < 0.01)
-                .collect();
+            // Clear winner
+            let (l, nl) = winners[0];
+            println!("\n=== Optimization Complete ===");
+            vlog!(
+                ELoggingVerbosity::Normal,
+                "Final suggestion: {} lands, {} nonlands (3 wins)",
+                l,
+                nl
+            );
+            break;
+        } 
+        else 
+        {
+            // Multiple decks reached 3 wins simultaneously → tiebreaker
+            println!("\nTiebreaker needed between {} decks!", winners.len());
 
-            if tied_candidates.len() == 1
+            let mut tiebreaker_results = Vec::new();
+
+            for (l, nl) in winners 
             {
-                // Clear winner
-                let (best_l, best_nl, best_avg) = tied_candidates[0];
-                println!("\n=== Optimization Complete ===");
-                vlog!(ELoggingVerbosity::Normal, "Final suggestion: {} lands, {} nonlands is optimal", best_l, best_nl);
-                vlog!(ELoggingVerbosity::Normal, "Average turns to death: {:.2}", best_avg);
-                break;
+                let r = sim::try_scenario(l, nl, &mut program_state);
+                tiebreaker_results.push((l, nl, r));
             }
-            else
-            {
-                // Tiebreaker needed
-                println!("\nTiebreaker needed! Testing {} tied configurations:", tied_candidates.len());
-                for (lands, nonlands, avg) in &tied_candidates
-                {
-                    println!("  {} lands, {} nonlands -> {:.2} avg turns", lands, nonlands, avg);
-                }
 
-                let mut tiebreaker_results: Vec<(u32, u32, f64)> = Vec::new();
-                for (lands, nonlands, _) in &tied_candidates
-                {
-                    let tiebreaker_result = sim::try_scenario(*lands, *nonlands, &mut program_state);
-                    if program_state.step_mode == StepCommand::RunDeck
-                    {
-                        program_state.step_mode = sim::parse_command(&read_line().trim());
-                    }
-                    if program_state.step_mode == StepCommand::Quit
-                    {
-                        break;
-                    }
-                    tiebreaker_results.push((*lands, *nonlands, tiebreaker_result));
-                }
+            let winner = tiebreaker_results
+                .iter()
+                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                .unwrap();
 
-                if program_state.step_mode == StepCommand::Quit
-                {
-                    break;
-                }
+            println!(
+                "\nTiebreaker winner: {} lands, {} nonlands -> {:.4}",
+                winner.0, winner.1, winner.2);
 
-                let tiebreaker_winner = tiebreaker_results.iter()
-                    .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
-                    .unwrap();
-
-                println!("\nTiebreaker winner: {} lands, {} nonlands -> {:.2} avg turns", 
-                         tiebreaker_winner.0, tiebreaker_winner.1, tiebreaker_winner.2);
-                println!("\n=== Optimization Complete ===");
-                vlog!(ELoggingVerbosity::Normal, "Final suggestion: {} lands, {} nonlands is optimal", 
-                      tiebreaker_winner.0, tiebreaker_winner.1);
-                vlog!(ELoggingVerbosity::Normal, "Average turns to death: {:.2}", tiebreaker_winner.2);
-                break;
-            }
+            vlog!(
+                ELoggingVerbosity::Normal,
+                "Final suggestion: {} lands, {} nonlands",
+                winner.0,
+                winner.1
+            );
+            break;
         }
 
         iteration += 1;
