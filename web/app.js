@@ -345,6 +345,134 @@ async function render()
     updateDisplay(state);
 }
 
+// Music Functions
+let musicEnabled = localStorage.getItem('musicEnabled') !== 'false';
+let musicFiles = [];
+let currentMusicIndex = 0;
+
+async function loadMusicFiles()
+{
+    try
+    {
+        // List all music files - we'll need to check common music formats
+        const formats = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+        
+        // For now, we'll assume there's at least one file and try to load it
+        // A more sophisticated implementation would list directory contents
+        // But for simplicity, we'll just try to play known music files
+        for (const format of formats)
+        {
+            try
+            {
+                const response = await fetch(`/music/Epic Christian Battle Cry - Raise Up The Saints.${format}`, { method: 'HEAD' });
+                if (response.ok)
+                {
+                    musicFiles.push(`/music/Epic Christian Battle Cry - Raise Up The Saints.${format}`);
+                }
+            }
+            catch (e)
+            {
+                // Continue trying other formats
+            }
+        }
+        
+        // Also try just the name without extension parsing
+        const response = await fetch(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`, { method: 'HEAD' });
+        if (response.ok && !musicFiles.includes(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`))
+        {
+            musicFiles.push(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`);
+        }
+    }
+    catch (e)
+    {
+        console.warn("Failed to load music files:", e);
+    }
+}
+
+function playNextMusic()
+{
+    if (musicFiles.length === 0)
+    {
+        // Try loading again
+        loadMusicFiles().then(() =>
+        {
+            if (musicFiles.length > 0)
+            {
+                playNextMusic();
+            }
+        });
+        return;
+    }
+    
+    const audioElement = document.getElementById('backgroundMusic');
+    const musicFile = musicFiles[currentMusicIndex % musicFiles.length];
+    audioElement.src = musicFile;
+    
+    if (musicEnabled)
+    {
+        audioElement.volume = 0.3; // 30% volume
+        audioElement.play().catch(e => 
+        {
+            console.warn("Failed to play music:", e);
+        });
+    }
+    
+    currentMusicIndex++;
+}
+
+function toggleMusic()
+{
+    musicEnabled = !musicEnabled;
+    const button = document.getElementById('musicToggle');
+    const audioElement = document.getElementById('backgroundMusic');
+    
+    if (musicEnabled)
+    {
+        button.textContent = '🔊 Music On';
+        button.style.backgroundColor = 'lightgreen';
+        audioElement.play().catch(e =>
+        {
+            console.warn("Failed to play music:", e);
+        });
+    }
+    else
+    {
+        button.textContent = '🔇 Music Off';
+        button.style.backgroundColor = 'lightcoral';
+        audioElement.pause();
+    }
+    
+    localStorage.setItem('musicEnabled', musicEnabled);
+}
+
 // Initial render and setup
 render();
 updateDeckInfo();
+
+// Load and play music
+loadMusicFiles().then(() =>
+{
+    if (musicFiles.length > 0)
+    {
+        playNextMusic();
+        
+        // Setup music to play the next track when current ends
+        const audioElement = document.getElementById('backgroundMusic');
+        audioElement.addEventListener('ended', () =>
+        {
+            setTimeout(playNextMusic, 2000); // 2 second delay between songs
+        });
+    }
+    else
+    {
+        console.warn("No music files found");
+    }
+});
+
+// Restore music button state
+if (!musicEnabled)
+{
+    const button = document.getElementById('musicToggle');
+    button.textContent = '🔇 Music Off';
+    button.style.backgroundColor = 'lightcoral';
+}
