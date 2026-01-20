@@ -1,10 +1,19 @@
-use engine::{set_global_verbosity, ELoggingVerbosity, game::ProgramState, game::StepCommand, sim};
+use engine::{set_global_verbosity, ELoggingVerbosity, game::ProgramState, game::StepCommand, sim, music::{MusicPlayer, MusicConfig}};
 use engine::vlog;
 use std::collections::HashMap;
 
 fn main()
 {
     set_global_verbosity(ELoggingVerbosity::Normal);
+
+    // Initialize background music
+    let music_config = MusicConfig {
+        fade_duration_ms: 1500,      // 1.5 second fade between songs
+        delay_between_songs_ms: 2000, // 2 second delay between songs
+        volume: 0.3,                  // 30% volume
+    };
+    let _music_player = MusicPlayer::new("../web/music", music_config);
+    _music_player.start();
 
     let mut program_state = ProgramState::new();
 
@@ -19,7 +28,7 @@ fn main()
     println!();
 
     let mut current_lands = 28;
-    let mut current_nonlands = 500;
+    let mut current_nonlands = 32;
     let change_size = 1;
 
     program_state.step_mode = sim::parse_command(&read_line().trim());

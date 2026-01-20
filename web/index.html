@@ -12,8 +12,13 @@
     <button onclick="doStep('deck')">Skip Deck (d)</button>
     <button onclick="doStep('all')">Run All (r)</button>
     <button onclick="restart()">Restart</button>
+    <button id="musicToggle" onclick="toggleMusic()">🔊 Music On</button>
     <button onclick="stopServer()">Stop Server</button>
   </div>
+
+  <!-- Background Music -->
+  <audio id="backgroundMusic" style="display:none;" loop>
+  </audio>
 
   <div class="game-info">
     <div class="info-item">

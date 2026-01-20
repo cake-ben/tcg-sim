@@ -43,7 +43,8 @@ async fn main()
         .route("/", get(index))
         .route("/app.js", get(js))
         .route("/style.css", get(css))
-        .route("/cards/*file", get(serve_card));
+        .route("/cards/*file", get(serve_card))
+        .route("/music/*file", get(serve_music));
 
     let addr: SocketAddr = "0.0.0.0:3000".parse().unwrap();
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -188,6 +189,35 @@ async fn serve_card(Path(file): Path<String>) -> impl IntoResponse
     let path = format!("web/cards/{}", file);
     match tokio::fs::read(path).await {
         Ok(bytes) => ([("content-type", "application/octet-stream")], bytes).into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "Not Found").into_response(),
+    }
+}
+
+async fn serve_music(Path(file): Path<String>) -> impl IntoResponse 
+{
+    if file.contains("..") 
+    {
+        return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
+    }
+
+    let path = format!("web/music/{}", file);
+    
+    let content_type = if file.ends_with(".mp3") {
+        "audio/mpeg"
+    } else if file.ends_with(".wav") {
+        "audio/wav"
+    } else if file.ends_with(".ogg") || file.ends_with(".oga") {
+        "audio/ogg"
+    } else if file.ends_with(".flac") {
+        "audio/flac"
+    } else if file.ends_with(".m4a") || file.ends_with(".aac") {
+        "audio/aac"
+    } else {
+        "audio/mpeg"
+    };
+    
+    match tokio::fs::read(path).await {
+        Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "Not Found").into_response(),
     }
 }
