@@ -13,12 +13,17 @@
     <button onclick="doStep('all')">Run All (r)</button>
     <button onclick="restart()">Restart</button>
     <button id="musicToggle" onclick="toggleMusic()">🔊 Music On</button>
+    <button onclick="skipMusic()">⏭️ Skip Song</button>
     <button onclick="stopServer()">Stop Server</button>
   </div>
 
   <!-- Background Music -->
   <audio id="backgroundMusic" style="display:none;" loop>
   </audio>
+
+  <div class="music-info">
+    <div>Now Playing: <span id="nowPlayingName">Loading music...</span></div>
+  </div>
 
   <div class="game-info">
     <div class="info-item">

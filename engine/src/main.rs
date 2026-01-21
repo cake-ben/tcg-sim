@@ -1,4 +1,4 @@
-use engine::{set_global_verbosity, ELoggingVerbosity, game::ProgramState, game::StepCommand, sim, music::{MusicPlayer, MusicConfig}};
+use engine::{set_global_verbosity, ELoggingVerbosity, game::ProgramState, game::StepCommand, sim, music::{MusicPlayer, MusicConfig, music_dir_path}};
 use engine::vlog;
 use std::collections::HashMap;
 
@@ -12,7 +12,8 @@ fn main()
         delay_between_songs_ms: 2000, // 2 second delay between songs
         volume: 0.3,                  // 30% volume
     };
-    let _music_player = MusicPlayer::new("../web/music", music_config);
+    let music_path = music_dir_path();
+    let _music_player = MusicPlayer::new(music_path.to_str().unwrap_or("web/music"), music_config);
     _music_player.start();
 
     let mut program_state = ProgramState::new();

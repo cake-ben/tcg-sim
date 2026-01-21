@@ -348,44 +348,57 @@ async function render()
 // Music Functions
 let musicEnabled = localStorage.getItem('musicEnabled') !== 'false';
 let musicFiles = [];
-let currentMusicIndex = 0;
+let shuffledPlaylist = [];
+let currentPlaylistIndex = 0;
+
+// Fisher-Yates shuffle algorithm
+function shuffleArray(array) 
+{
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) 
+    {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
 
 async function loadMusicFiles()
 {
     try
     {
-        // List all music files - we'll need to check common music formats
-        const formats = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+        const response = await fetch('/api/music-list');
+        const data = await response.json();
+        musicFiles = data.files.map(file => `/music/${file}`);
         
-        // For now, we'll assume there's at least one file and try to load it
-        // A more sophisticated implementation would list directory contents
-        // But for simplicity, we'll just try to play known music files
-        for (const format of formats)
+        if (musicFiles.length > 0)
         {
-            try
-            {
-                const response = await fetch(`/music/Epic Christian Battle Cry - Raise Up The Saints.${format}`, { method: 'HEAD' });
-                if (response.ok)
-                {
-                    musicFiles.push(`/music/Epic Christian Battle Cry - Raise Up The Saints.${format}`);
-                }
-            }
-            catch (e)
-            {
-                // Continue trying other formats
-            }
+            // Create initial shuffled playlist
+            shuffledPlaylist = shuffleArray(musicFiles);
+            currentPlaylistIndex = 0;
+            console.log("Music files loaded and shuffled:", shuffledPlaylist);
         }
-        
-        // Also try just the name without extension parsing
-        const response = await fetch(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`, { method: 'HEAD' });
-        if (response.ok && !musicFiles.includes(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`))
+        else
         {
-            musicFiles.push(`/music/Epic Christian Battle Cry - Raise Up The Saints.mp3`);
+            console.warn("No music files found on server");
+            document.getElementById('nowPlayingName').textContent = 'No music files found';
         }
     }
     catch (e)
     {
-        console.warn("Failed to load music files:", e);
+        console.error("Failed to load music files:", e);
+        document.getElementById('nowPlayingName').textContent = 'Error loading music';
+    }
+}
+
+function updateNowPlaying()
+{
+    if (shuffledPlaylist.length > 0 && currentPlaylistIndex < shuffledPlaylist.length)
+    {
+        const currentFile = shuffledPlaylist[currentPlaylistIndex];
+        // Extract the filename from the path
+        const filename = currentFile.split('/').pop();
+        document.getElementById('nowPlayingName').textContent = filename;
     }
 }
 
@@ -404,9 +417,19 @@ function playNextMusic()
         return;
     }
     
+    // If we've reached the end of the playlist, reshuffle
+    if (currentPlaylistIndex >= shuffledPlaylist.length)
+    {
+        shuffledPlaylist = shuffleArray(musicFiles);
+        currentPlaylistIndex = 0;
+        console.log("Playlist reshuffled");
+    }
+    
     const audioElement = document.getElementById('backgroundMusic');
-    const musicFile = musicFiles[currentMusicIndex % musicFiles.length];
+    const musicFile = shuffledPlaylist[currentPlaylistIndex];
     audioElement.src = musicFile;
+    
+    updateNowPlaying();
     
     if (musicEnabled)
     {
@@ -417,7 +440,17 @@ function playNextMusic()
         });
     }
     
-    currentMusicIndex++;
+    currentPlaylistIndex++;
+}
+
+function skipMusic()
+{
+    const audioElement = document.getElementById('backgroundMusic');
+    audioElement.pause();
+    audioElement.currentTime = 0;
+    
+    // Play the next song after a short delay
+    setTimeout(playNextMusic, 100);
 }
 
 function toggleMusic()
@@ -430,10 +463,13 @@ function toggleMusic()
     {
         button.textContent = '🔊 Music On';
         button.style.backgroundColor = 'lightgreen';
-        audioElement.play().catch(e =>
+        if (audioElement.src)
         {
-            console.warn("Failed to play music:", e);
-        });
+            audioElement.play().catch(e =>
+            {
+                console.warn("Failed to play music:", e);
+            });
+        }
     }
     else
     {

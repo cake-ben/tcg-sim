@@ -6,6 +6,30 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use walkdir::WalkDir;
+use rand::seq::SliceRandom;
+
+/// Find the web directory by searching upward from the current directory
+pub fn find_web_dir() -> PathBuf {
+    let mut current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    
+    loop {
+        let web_path = current.join("web");
+        if web_path.exists() && web_path.is_dir() {
+            return current;
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    
+    // Fallback to current directory
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Get the path to a resource relative to the web directory
+pub fn music_dir_path() -> PathBuf {
+    find_web_dir().join("web/music")
+}
 
 /// Configuration for music playback
 #[derive(Clone)]
@@ -73,7 +97,8 @@ impl MusicPlayer {
             }
         }
 
-        files.sort(); // Sort for consistent playback order
+        // Shuffle for random playback order
+        files.shuffle(&mut rand::thread_rng());
         files
     }
 
